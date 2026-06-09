@@ -1,0 +1,6 @@
+{
+  "name": "Pagges Chat",
+  "description": "A clean, modern chat application with a persistent bottom navigation bar.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
