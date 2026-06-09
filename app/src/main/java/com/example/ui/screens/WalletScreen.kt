@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.app.Application
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -173,11 +174,15 @@ fun WalletScreen(
         }
     }
 
+    val context = LocalContext.current
+
     if (showSendMoneyDialog) {
         SendMoneyDialog(
             onDismiss = { showSendMoneyDialog = false },
             onSend = { email, amount ->
-                viewModel.sendMoney(amount, email)
+                viewModel.sendMoney(amount, email) { isSuccess, message ->
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
                 showSendMoneyDialog = false
             }
         )

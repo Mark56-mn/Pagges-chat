@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
@@ -32,7 +33,11 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val authViewModel: com.example.ui.screens.AuthViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
                 
-                NavHost(navController = navController, startDestination = "login") {
+                val isLogged = remember { 
+                    com.example.data.SupabaseManager.client.pluginManager.getPluginOrNull(io.github.jan.supabase.gotrue.Auth)?.currentUserOrNull() != null 
+                }
+                val startDest = if (isLogged) "main" else "login"
+                NavHost(navController = navController, startDestination = startDest) {
                     composable("login") {
                         com.example.ui.screens.LoginScreen(
                             onNavigateToSignup = { navController.navigate("signup") },

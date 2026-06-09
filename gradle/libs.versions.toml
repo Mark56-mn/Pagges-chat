@@ -42,7 +42,7 @@ secretsGradlePlugin = "2.0.1"
 kotlinxSerializationJson = "1.8.0"
 retrofitConverterSerialization = "2.11.0"
 
-ktor = "3.0.0"
+ktor = "2.3.12"
 supabaseKt = "2.6.1"
 
 [libraries]

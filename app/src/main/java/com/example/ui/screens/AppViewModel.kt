@@ -10,6 +10,13 @@ import io.github.jan.supabase.gotrue.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
+import io.github.jan.supabase.realtime.decodeRecord
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,14 +94,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getMessages(conversationId: String): StateFlow<List<Message>> {
+        val isNew = !messageFlows.containsKey(conversationId)
         val flow = messageFlows.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        viewModelScope.launch {
-            try {
-                flow.value = SupabaseManager.client.postgrest["messages"]
-                    .select { filter { eq("conversation_id", conversationId) } }
-                    .decodeList<Message>()
-            } catch (e: Exception) {
-                Log.e("AppViewModel", "Error fetching messages", e)
+        if (isNew) {
+            viewModelScope.launch {
+                try {
+                    flow.value = SupabaseManager.client.postgrest["messages"]
+                        .select { filter { eq("conversation_id", conversationId) } }
+                        .decodeList<Message>()
+
+                    val channel = SupabaseManager.client.channel("messages_$conversationId")
+                    val messageChanges = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                        table = "messages"
+                        filter = "conversation_id=eq.$conversationId"
+                    }
+                    
+                    messageChanges.onEach { action ->
+                        val newMessage = action.decodeRecord<Message>()
+                        val currentList = flow.value
+                        if (currentList.none { it.id == newMessage.id }) {
+                            flow.value = currentList + newMessage
+                        }
+                    }.launchIn(viewModelScope)
+
+                    io.github.jan.supabase.realtime.Realtime // Just to make sure it's loaded
+                    SupabaseManager.client.realtime.connect()
+                    channel.subscribe()
+                } catch (e: Exception) {
+                    Log.e("AppViewModel", "Error fetching messages", e)
+                }
             }
         }
         return flow.asStateFlow()
@@ -124,9 +152,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendMoney(amount: Double, recipient: String) {
-        val currentWallet = _wallet.value ?: return
-        if (currentWallet.balance < amount || amount <= 0) return
+    fun sendMoney(amount: Double, recipient: String, onResult: (Boolean, String) -> Unit) {
+        val currentWallet = _wallet.value ?: run {
+            onResult(false, "Wallet not loaded")
+            return
+        }
+        if (currentWallet.balance < amount) {
+            onResult(false, "Insufficient balance")
+            return
+        }
+        if (amount <= 0) {
+            onResult(false, "Amount must be greater than 0")
+            return
+        }
 
         viewModelScope.launch {
             try {
@@ -141,12 +179,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ).decodeAs<TransferFundsResponse>()
 
                 if (response.success) {
-                    fetchData() // Refresh balances and transactions
+                    fetchData()
+                    onResult(true, "Transfer successful")
                 } else {
                     Log.e("AppViewModel", "RPC Error: ${response.error}")
+                    onResult(false, response.message ?: response.error ?: "Transfer failed")
                 }
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error sending money", e)
+                onResult(false, e.message ?: "An error occurred")
             }
         }
     }
