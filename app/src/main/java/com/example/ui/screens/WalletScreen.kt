@@ -53,7 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.ai.Transaction
+import com.example.model.Transaction
 import com.example.ui.theme.BorderColor
 import com.example.ui.theme.Green500
 import com.example.ui.theme.Indigo100

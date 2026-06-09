@@ -42,6 +42,9 @@ secretsGradlePlugin = "2.0.1"
 kotlinxSerializationJson = "1.8.0"
 retrofitConverterSerialization = "2.11.0"
 
+ktor = "3.0.0"
+supabaseKt = "2.6.1"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -92,6 +95,10 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-ai = { group = "com.google.firebase", name = "firebase-ai" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 retrofit-converter-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofitConverterSerialization" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+supabase-postgrest-kt = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt", version.ref = "supabaseKt" }
+supabase-gotrue-kt = { group = "io.github.jan-tennert.supabase", name = "gotrue-kt", version.ref = "supabaseKt" }
+supabase-realtime-kt = { group = "io.github.jan-tennert.supabase", name = "realtime-kt", version.ref = "supabaseKt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

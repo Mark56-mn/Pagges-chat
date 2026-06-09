@@ -3,31 +3,20 @@ package com.example.ui.screens
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
-import com.example.ai.AuthRequest
-import com.example.ai.SupabaseClient
+import com.example.data.SupabaseManager
+import io.github.jan.supabase.gotrue.auth
+import io.github.jan.supabase.gotrue.providers.builtin.Email
 import kotlinx.coroutines.launch
 
 class AuthViewModel : ViewModel() {
     fun login(email: String, password: String, onResult: (Boolean, String?) -> Unit) {
-        if (BuildConfig.SUPABASE_PROJECT_ID.isEmpty() || BuildConfig.SUPABASE_API_KEY.isEmpty()) {
-            onResult(false, "Supabase credentials missing from Secrets.")
-            return
-        }
-
         viewModelScope.launch {
             try {
-                val response = SupabaseClient.service.login(
-                    apiKey = BuildConfig.SUPABASE_API_KEY,
-                    request = AuthRequest(email, password)
-                )
-                if (response.access_token != null && response.user != null) {
-                    SupabaseClient.currentToken = response.access_token
-                    SupabaseClient.currentUser = response.user
-                    onResult(true, null)
-                } else {
-                    onResult(false, response.error_description ?: response.msg ?: "Login failed")
+                SupabaseManager.client.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = password
                 }
+                onResult(true, null)
             } catch (e: Exception) {
                 Log.e("Auth", "Login error", e)
                 onResult(false, e.message ?: "An error occurred")
@@ -36,27 +25,13 @@ class AuthViewModel : ViewModel() {
     }
 
     fun signup(email: String, password: String, onResult: (Boolean, String?) -> Unit) {
-        if (BuildConfig.SUPABASE_PROJECT_ID.isEmpty() || BuildConfig.SUPABASE_API_KEY.isEmpty()) {
-            onResult(false, "Supabase credentials missing from Secrets.")
-            return
-        }
-
         viewModelScope.launch {
             try {
-                val response = SupabaseClient.service.signup(
-                    apiKey = BuildConfig.SUPABASE_API_KEY,
-                    request = AuthRequest(email, password)
-                )
-                if (response.access_token != null && response.user != null) {
-                    SupabaseClient.currentToken = response.access_token
-                    SupabaseClient.currentUser = response.user
-                    onResult(true, null)
-                } else if (response.user != null) {
-                 	// sometimes signup doesn't return token if email confirmation is required
-                    onResult(true, "Please check your email to confirm.")
-                } else {
-                    onResult(false, response.error_description ?: response.msg ?: "Signup failed")
+                SupabaseManager.client.auth.signUpWith(Email) {
+                    this.email = email
+                    this.password = password
                 }
+                onResult(true, null)
             } catch (e: Exception) {
                 Log.e("Auth", "Signup error", e)
                 onResult(false, e.message ?: "An error occurred")
@@ -65,7 +40,12 @@ class AuthViewModel : ViewModel() {
     }
 
     fun logout() {
-        SupabaseClient.currentToken = null
-        SupabaseClient.currentUser = null
+        viewModelScope.launch {
+            try {
+                SupabaseManager.client.auth.signOut()
+            } catch (e: Exception) {
+                Log.e("Auth", "Logout error", e)
+            }
+        }
     }
 }

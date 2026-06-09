@@ -4,8 +4,12 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.BuildConfig
-import com.example.ai.*
+import com.example.data.SupabaseManager
+import com.example.model.*
+import io.github.jan.supabase.gotrue.auth
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,48 +36,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fetchData()
     }
 
-    private fun getAuthHeader(): String {
-        return "Bearer ${SupabaseClient.currentToken ?: ""}"
-    }
-
-    private fun getApiKey(): String {
-        return BuildConfig.SUPABASE_API_KEY
-    }
-
     private fun getUserId(): String {
-        return SupabaseClient.currentUser?.id ?: ""
+        return SupabaseManager.client.auth.currentUserOrNull()?.id ?: ""
     }
 
     private fun fetchData() {
-        if (SupabaseClient.currentToken == null || getUserId().isEmpty()) return
+        val userId = getUserId()
+        if (userId.isEmpty()) return
         
         viewModelScope.launch {
             try {
                 // Fetch Profile
-                val profiles = SupabaseClient.service.getProfile(getApiKey(), getAuthHeader(), "eq.${getUserId()}")
-                if (profiles.isNotEmpty()) {
-                    _userProfile.value = profiles.first()
+                val profileResult = SupabaseManager.client.postgrest["profiles"]
+                    .select { filter { eq("id", userId) } }
+                    .decodeList<Profile>()
+                if (profileResult.isNotEmpty()) {
+                    _userProfile.value = profileResult.first()
                 } else {
-                    val newProfile = Profile(id = getUserId(), display_name = "New User", bio = "")
-                    SupabaseClient.service.insertProfile(getApiKey(), getAuthHeader(), profile = newProfile)
+                    val newProfile = Profile(id = userId, display_name = "New User", bio = "")
+                    SupabaseManager.client.postgrest["profiles"].insert(newProfile)
                     _userProfile.value = newProfile
                 }
 
                 // Fetch Wallet
-                val wallets = SupabaseClient.service.getWallet(getApiKey(), getAuthHeader(), "eq.${getUserId()}")
-                if (wallets.isNotEmpty()) {
-                    _wallet.value = wallets.first()
+                val walletResult = SupabaseManager.client.postgrest["wallets"]
+                    .select { filter { eq("user_id", userId) } }
+                    .decodeList<Wallet>()
+                if (walletResult.isNotEmpty()) {
+                    _wallet.value = walletResult.first()
                 } else {
-                    val newWallet = Wallet(user_id = getUserId(), balance = 0.0)
-                    SupabaseClient.service.upsertWallet(getApiKey(), getAuthHeader(), wallet = newWallet)
+                    val newWallet = Wallet(user_id = userId, balance = 0.0)
+                    SupabaseManager.client.postgrest["wallets"].upsert(newWallet)
                     _wallet.value = newWallet
                 }
 
                 // Fetch Transactions
-                _transactions.value = SupabaseClient.service.getTransactions(getApiKey(), getAuthHeader(), "eq.${getUserId()}")
+                _transactions.value = SupabaseManager.client.postgrest["transactions"]
+                    .select { filter { eq("user_id", userId) } }
+                    .decodeList<Transaction>()
 
                 // Fetch Conversations
-                _conversations.value = SupabaseClient.service.getConversations(getApiKey(), getAuthHeader(), "eq.${getUserId()}")
+                _conversations.value = SupabaseManager.client.postgrest["conversations"]
+                    .select { filter { eq("user_id", userId) } }
+                    .decodeList<Conversation>()
 
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error fetching data", e)
@@ -85,7 +90,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val flow = messageFlows.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
         viewModelScope.launch {
             try {
-                flow.value = SupabaseClient.service.getMessages(getApiKey(), getAuthHeader(), "eq.$conversationId")
+                flow.value = SupabaseManager.client.postgrest["messages"]
+                    .select { filter { eq("conversation_id", conversationId) } }
+                    .decodeList<Message>()
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error fetching messages", e)
             }
@@ -98,7 +105,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val newWallet = currentWallet.copy(balance = currentWallet.balance + amount)
-                SupabaseClient.service.upsertWallet(getApiKey(), getAuthHeader(), wallet = newWallet)
+                SupabaseManager.client.postgrest["wallets"].upsert(newWallet)
                 _wallet.value = newWallet
 
                 val newTx = Transaction(
@@ -109,7 +116,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     type = "RECEIVED",
                     timestamp = System.currentTimeMillis()
                 )
-                SupabaseClient.service.insertTransaction(getApiKey(), getAuthHeader(), newTx)
+                SupabaseManager.client.postgrest["transactions"].insert(newTx)
                 _transactions.value = listOf(newTx) + _transactions.value
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error adding funds", e)
@@ -119,24 +126,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun sendMoney(amount: Double, recipient: String) {
         val currentWallet = _wallet.value ?: return
-        if (currentWallet.balance < amount) return
-        
+        if (currentWallet.balance < amount || amount <= 0) return
+
         viewModelScope.launch {
             try {
-                val newWallet = currentWallet.copy(balance = currentWallet.balance - amount)
-                SupabaseClient.service.upsertWallet(getApiKey(), getAuthHeader(), wallet = newWallet)
-                _wallet.value = newWallet
-
-                val newTx = Transaction(
-                    id = UUID.randomUUID().toString(),
-                    user_id = getUserId(),
-                    amount = amount,
-                    party_name = recipient,
-                    type = "SENT",
-                    timestamp = System.currentTimeMillis()
+                val request = TransferFundsRequest(
+                    sender_id = getUserId(),
+                    receiver_id = recipient,
+                    amount = amount
                 )
-                SupabaseClient.service.insertTransaction(getApiKey(), getAuthHeader(), newTx)
-                _transactions.value = listOf(newTx) + _transactions.value
+                val response = SupabaseManager.client.postgrest.rpc(
+                    "transfer_funds",
+                    request
+                ).decodeAs<TransferFundsResponse>()
+
+                if (response.success) {
+                    fetchData() // Refresh balances and transactions
+                } else {
+                    Log.e("AppViewModel", "RPC Error: ${response.error}")
+                }
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error sending money", e)
             }
@@ -154,7 +162,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     is_ai = isAi,
                     timestamp = System.currentTimeMillis()
                 )
-                SupabaseClient.service.insertMessage(getApiKey(), getAuthHeader(), msg)
+                SupabaseManager.client.postgrest["messages"].insert(msg)
                 
                 val flow = messageFlows[conversationId]
                 if (flow != null) {
@@ -177,7 +185,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     is_ai = isAi,
                     timestamp = System.currentTimeMillis()
                 )
-                SupabaseClient.service.insertMessage(getApiKey(), getAuthHeader(), msg)
+                SupabaseManager.client.postgrest["messages"].insert(msg)
                 
                 val flow = messageFlows[conversationId]
                 if (flow != null) {
@@ -194,7 +202,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val newProfile = currentProfile.copy(display_name = name, bio = bio)
-                SupabaseClient.service.updateProfile(getApiKey(), getAuthHeader(), "eq.${getUserId()}", newProfile)
+                SupabaseManager.client.postgrest["profiles"]
+                    .update(
+                        {
+                            set("display_name", newProfile.display_name)
+                            set("bio", newProfile.bio)
+                        }
+                    ) { filter { eq("id", getUserId()) } }
                 _userProfile.value = newProfile
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error updating profile", e)
