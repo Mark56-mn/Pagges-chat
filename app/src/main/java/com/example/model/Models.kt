@@ -6,7 +6,8 @@ import kotlinx.serialization.Serializable
 data class Profile(
     val id: String,
     val display_name: String,
-    val bio: String
+    val bio: String,
+    val avatar_url: String? = null
 )
 
 @Serializable
@@ -30,7 +31,8 @@ data class Conversation(
     val id: String,
     val other_party_name: String,
     val last_message: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val avatar_url: String? = null
 )
 
 @Serializable
@@ -40,7 +42,9 @@ data class Message(
     val text: String,
     val is_from_me: Boolean,
     val is_ai: Boolean,
-    val timestamp: Long
+    val timestamp: Long,
+    val image_url: String? = null,
+    val voice_note_url: String? = null
 )
 
 @Serializable

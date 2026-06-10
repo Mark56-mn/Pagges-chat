@@ -69,20 +69,31 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(32.dp))
             
             // Avatar Placeholder
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .border(4.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = name.take(2).uppercase(),
-                    fontSize = 48.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+            if (!userProfile?.avatar_url.isNullOrBlank()) {
+                com.example.ui.components.OfflineImage(
+                    imageUrl = userProfile?.avatar_url,
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(CircleShape)
+                        .border(4.dp, MaterialTheme.colorScheme.primary, CircleShape)
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .border(4.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = name.take(2).uppercase(),
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(32.dp))

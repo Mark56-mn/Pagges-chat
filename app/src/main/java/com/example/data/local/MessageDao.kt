@@ -19,4 +19,7 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE isSynced = 0")
     suspend fun getUnsyncedMessages(): List<MessageEntity>
+
+    @Query("SELECT * FROM messages JOIN messages_fts ON messages.id = messages_fts.rowid WHERE messages_fts MATCH :query")
+    suspend fun searchMessages(query: String): List<MessageEntity>
 }

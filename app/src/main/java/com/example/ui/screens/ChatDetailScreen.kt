@@ -50,6 +50,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailScreen(
@@ -68,6 +72,10 @@ fun ChatDetailScreen(
     var inputText by remember { mutableStateOf("") }
     var showAiModal by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val audioRecorderManager = remember { com.example.util.AudioRecorderManager(context) }
+    var isRecording by remember { mutableStateOf(false) }
+
     androidx.compose.runtime.LaunchedEffect(inputText) {
         viewModel.setTyping(conversationId, inputText.isNotBlank())
     }
@@ -78,19 +86,29 @@ fun ChatDetailScreen(
             androidx.compose.material3.TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(androidx.compose.foundation.shape.CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = conversation?.other_party_name?.take(2)?.uppercase() ?: "U",
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                        if (!conversation?.avatar_url.isNullOrBlank()) {
+                            com.example.ui.components.OfflineImage(
+                                imageUrl = conversation?.avatar_url,
+                                contentDescription = "Profile Picture",
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = conversation?.other_party_name?.take(2)?.uppercase() ?: "U",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
@@ -137,17 +155,41 @@ fun ChatDetailScreen(
                     maxLines = 4
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank()) {
-                            viewModel.sendMessage(conversationId, inputText)
-                            inputText = ""
-                            // For demo purposes, auto-reply if they mention specific things, or just simple mock AI...
-                        }
-                    },
-                    modifier = Modifier.background(MaterialTheme.colorScheme.primary, RoundedCornerShape(24.dp))
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                if (inputText.isBlank() && !isRecording) {
+                    IconButton(
+                        onClick = { 
+                            val started = audioRecorderManager.startRecording()
+                            if (started) isRecording = true
+                        },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(24.dp))
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "Record", tint = MaterialTheme.colorScheme.onSecondary)
+                    }
+                } else if (isRecording) {
+                    IconButton(
+                        onClick = {
+                            val path = audioRecorderManager.stopRecording()
+                            isRecording = false
+                            if (path != null) {
+                                viewModel.sendMessage(conversationId, "🎤 Voice Note", isAi = false, voiceNoteUrl = path)
+                            }
+                        },
+                        modifier = Modifier.background(Color.Red, RoundedCornerShape(24.dp))
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.White)
+                    }
+                } else {
+                    IconButton(
+                        onClick = {
+                            if (inputText.isNotBlank()) {
+                                viewModel.sendMessage(conversationId, inputText)
+                                inputText = ""
+                            }
+                        },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.primary, RoundedCornerShape(24.dp))
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                    }
                 }
             }
         }
@@ -173,7 +215,10 @@ fun ChatDetailScreen(
                     isFromMe = msg.is_from_me,
                     isAi = msg.is_ai,
                     timestamp = msg.timestamp,
-                    initials = initials
+                    initials = initials,
+                    avatarUrl = conversation?.avatar_url,
+                    imageUrl = msg.image_url,
+                    voiceNoteUrl = msg.voice_note_url
                 )
             }
         }
@@ -299,7 +344,16 @@ fun TypingIndicatorBubble() {
 }
 
 @Composable
-fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean, timestamp: Long, initials: String = "U") {
+fun MessageBubble(
+    text: String, 
+    isFromMe: Boolean, 
+    isAi: Boolean, 
+    timestamp: Long, 
+    initials: String = "U",
+    avatarUrl: String? = null,
+    imageUrl: String? = null,
+    voiceNoteUrl: String? = null
+) {
     val bgColor = when {
         isAi -> Color(0xFFE8F5E9)   // Light green for AI
         isFromMe -> MaterialTheme.colorScheme.primaryContainer
@@ -331,19 +385,29 @@ fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean, timestamp: Lon
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (!isFromMe) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (isAi) Color(0xFF81C784) else MaterialTheme.colorScheme.secondary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isAi) "AI" else initials,
-                        color = if (isAi) Color.White else MaterialTheme.colorScheme.onSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                if (!avatarUrl.isNullOrBlank()) {
+                    com.example.ui.components.OfflineImage(
+                        imageUrl = avatarUrl,
+                        contentDescription = "Profile Picture",
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (isAi) Color(0xFF81C784) else MaterialTheme.colorScheme.secondary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isAi) "AI" else initials,
+                            color = if (isAi) Color.White else MaterialTheme.colorScheme.onSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
@@ -354,8 +418,25 @@ fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean, timestamp: Lon
                     .background(bgColor)
                     .padding(12.dp)
             ) {
-                Text(text = text, color = textColor, fontSize = 16.sp)
-                Spacer(modifier = Modifier.height(4.dp))
+                if (!imageUrl.isNullOrBlank()) {
+                    com.example.ui.components.OfflineImage(
+                        imageUrl = imageUrl,
+                        contentDescription = "Message Image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                
+                if (!voiceNoteUrl.isNullOrBlank()) {
+                    com.example.ui.components.VoiceNotePlayer(voiceNoteUrl = voiceNoteUrl)
+                    Spacer(modifier = Modifier.height(8.dp))
+                } else if (text.isNotBlank() && text != "🎤 Voice Note") {
+                    Text(text = text, color = textColor, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 Text(
                     text = timeString, 
                     color = textColor.copy(alpha = 0.7f), 

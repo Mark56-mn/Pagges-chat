@@ -39,7 +39,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _userProfile = MutableStateFlow<Profile?>(null)
     val userProfile: StateFlow<Profile?> = _userProfile.asStateFlow()
 
+    private val _searchResults = MutableStateFlow<List<com.example.data.local.MessageEntity>>(emptyList())
+    val searchResults: StateFlow<List<com.example.data.local.MessageEntity>> = _searchResults.asStateFlow()
+
     private val messageFlows = mutableMapOf<String, MutableStateFlow<List<Message>>>()
+
+    fun searchLocalMessages(query: String) {
+        viewModelScope.launch {
+            if (query.isBlank()) {
+                _searchResults.value = emptyList()
+                return@launch
+            }
+            try {
+                val db = com.example.data.local.AppDatabase.getDatabase(getApplication())
+                // FTS4 match query syntax needs to be considered. We will use "*query*" for a simple match
+                val searchQuery = "$query*"
+                _searchResults.value = db.messageDao().searchMessages(searchQuery)
+            } catch (e: Exception) {
+                Log.e("AppViewModel", "Error searching messages", e)
+            }
+        }
+    }
 
     init {
         fetchData()
@@ -235,7 +255,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendMessage(conversationId: String, text: String, isAi: Boolean = false) {
+    fun sendMessage(conversationId: String, text: String, isAi: Boolean = false, voiceNoteUrl: String? = null) {
         viewModelScope.launch {
             try {
                 val database = com.example.data.local.AppDatabase.getDatabase(getApplication())
@@ -252,7 +272,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     text = text,
                     timestamp = System.currentTimeMillis(),
                     isFromMe = true,
-                    isSynced = false
+                    isSynced = false,
+                    voiceNoteUrl = voiceNoteUrl
                 )
                 messageDao.insert(entity)
 

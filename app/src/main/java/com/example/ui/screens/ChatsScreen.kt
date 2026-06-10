@@ -51,6 +51,10 @@ import com.example.ui.theme.PrimaryContainer
 import com.example.ui.theme.SecondaryContainer
 import com.example.ui.theme.Slate300
 
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Search
+
 @Composable
 fun ChatsScreen(
     modifier: Modifier = Modifier,
@@ -61,6 +65,13 @@ fun ChatsScreen(
 ) {
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
+    
+    var searchQuery by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    
+    androidx.compose.runtime.LaunchedEffect(searchQuery) {
+        viewModel.searchLocalMessages(searchQuery)
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -102,22 +113,66 @@ fun ChatsScreen(
                         ) {
                             Icon(Icons.Filled.MoreHoriz, contentDescription = "More", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                                .border(2.dp, Color.White, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(userProfile?.display_name?.take(2)?.uppercase() ?: "U", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        if (!userProfile?.avatar_url.isNullOrBlank()) {
+                            com.example.ui.components.OfflineImage(
+                                imageUrl = userProfile?.avatar_url,
+                                contentDescription = "Profile Picture",
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, Color.White, CircleShape)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .border(2.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(userProfile?.display_name?.take(2)?.uppercase() ?: "U", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
 
-            // Quick Actions ...
             item {
+                androidx.compose.material3.OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search messages...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") }
+                )
+            }
+
+            if (searchQuery.isNotBlank()) {
+                items(searchResults) { result ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { onNavigateToChat(result.conversationId) },
+                        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(text = result.text.takeIf { it.isNotBlank() } ?: "Audio Message", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.height(4.dp))
+                            val timeString = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(result.timestamp))
+                            Text(text = timeString, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                // Quick Actions ...
+                item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -233,10 +288,12 @@ fun ChatsScreen(
                         textColor = textColor,
                         isHighlighted = isHighlighted,
                         showOnlineDot = isHighlighted,
+                        avatarUrl = conv.avatar_url,
                         onClick = { onNavigateToChat(conv.id) }
                     )
                 }
             }
+            } // Close else block
         }
     }
 }
@@ -251,6 +308,7 @@ fun ChatItem(
     textColor: Color,
     isHighlighted: Boolean,
     showOnlineDot: Boolean,
+    avatarUrl: String? = null,
     onClick: () -> Unit
 ) {
     val bgModifier = if (isHighlighted) {
@@ -270,14 +328,24 @@ fun ChatItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(avatarColor),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(initials, color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            if (!avatarUrl.isNullOrBlank()) {
+                com.example.ui.components.OfflineImage(
+                    imageUrl = avatarUrl,
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(avatarColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(initials, color = textColor, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
             }
             if (showOnlineDot) {
                 Box(
