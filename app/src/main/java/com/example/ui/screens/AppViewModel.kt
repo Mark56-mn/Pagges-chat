@@ -202,9 +202,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
+                // Look up recipient
+                val profilesResult = SupabaseManager.client.postgrest["profiles"]
+                    .select { filter { eq("display_name", recipient) } }
+                    .decodeList<Profile>()
+                val receiverId = profilesResult.firstOrNull()?.id
+                if (receiverId == null) {
+                    onResult(false, "Recipient not found")
+                    return@launch
+                }
+
                 val request = TransferFundsRequest(
                     sender_id = getUserId(),
-                    receiver_id = recipient,
+                    receiver_id = receiverId,
                     amount = amount
                 )
                 val response = SupabaseManager.client.postgrest.rpc(
@@ -238,11 +248,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = System.currentTimeMillis()
                 )
                 SupabaseManager.client.postgrest["messages"].insert(msg)
-                
-                val flow = messageFlows[conversationId]
-                if (flow != null) {
-                    flow.value = listOf(msg) + flow.value
-                }
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error sending message", e)
             }

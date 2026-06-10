@@ -309,10 +309,10 @@ fun SendMoneyDialog(onDismiss: () -> Unit, onSend: (String, Double) -> Unit) {
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("Recipient Email") },
+                    label = { Text("Recipient Username") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
                 )
                 OutlinedTextField(
                     value = amount,
