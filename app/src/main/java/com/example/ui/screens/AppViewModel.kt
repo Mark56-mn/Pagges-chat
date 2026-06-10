@@ -202,35 +202,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                // Look up recipient
-                val profilesResult = SupabaseManager.client.postgrest["profiles"]
-                    .select { filter { eq("display_name", recipient) } }
-                    .decodeList<Profile>()
-                val receiverId = profilesResult.firstOrNull()?.id
-                if (receiverId == null) {
-                    onResult(false, "Recipient not found")
-                    return@launch
-                }
+                val database = com.example.data.local.AppDatabase.getDatabase(getApplication())
+                val pendingSyncDao = database.pendingSyncDao()
+                val syncManager = com.example.worker.SyncManager(getApplication())
 
-                val request = TransferFundsRequest(
-                    sender_id = getUserId(),
-                    receiver_id = receiverId,
-                    amount = amount
+                // Local optimistic update (we don't have local transaction dao in this demo but we queue the sync request)
+                val txId = UUID.randomUUID().toString()
+                
+                // We're simulating saving to Room first and immediately returning success as requested
+                // Example payload we can use later during sync
+                val payload = "{\"amount\": $amount, \"recipient\": \"$recipient\"}"
+
+                val syncOp = com.example.data.local.PendingSyncEntity(
+                    id = UUID.randomUUID().toString(),
+                    operationType = "RPC_TRANSFER",
+                    tableName = "transactions",
+                    recordId = txId,
+                    payload = payload
                 )
-                val response = SupabaseManager.client.postgrest.rpc(
-                    "transfer_funds",
-                    request
-                ).decodeAs<TransferFundsResponse>()
+                pendingSyncDao.insert(syncOp)
+                
+                // Trigger sync worker
+                syncManager.triggerSync()
 
-                if (response.success) {
-                    fetchData()
-                    onResult(true, "Transfer successful")
-                } else {
-                    Log.e("AppViewModel", "RPC Error: ${response.error}")
-                    onResult(false, response.message ?: response.error ?: "Transfer failed")
-                }
+                // Immediately return success
+                onResult(true, "Transfer queued successfully")
+
             } catch (e: Exception) {
-                Log.e("AppViewModel", "Error sending money", e)
+                Log.e("AppViewModel", "Error queuing money transfer", e)
                 onResult(false, e.message ?: "An error occurred")
             }
         }
@@ -239,15 +238,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(conversationId: String, text: String, isAi: Boolean = false) {
         viewModelScope.launch {
             try {
-                val msg = Message(
-                    id = UUID.randomUUID().toString(),
-                    conversation_id = conversationId,
+                val database = com.example.data.local.AppDatabase.getDatabase(getApplication())
+                val messageDao = database.messageDao()
+                val pendingSyncDao = database.pendingSyncDao()
+                val syncManager = com.example.worker.SyncManager(getApplication())
+
+                val msgId = UUID.randomUUID().toString()
+                
+                val entity = com.example.data.local.MessageEntity(
+                    id = msgId,
+                    conversationId = conversationId,
+                    senderId = getUserId(),
                     text = text,
-                    is_from_me = true,
-                    is_ai = isAi,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = System.currentTimeMillis(),
+                    isFromMe = true,
+                    isSynced = false
                 )
-                SupabaseManager.client.postgrest["messages"].insert(msg)
+                messageDao.insert(entity)
+
+                val syncOp = com.example.data.local.PendingSyncEntity(
+                    id = UUID.randomUUID().toString(),
+                    operationType = "INSERT",
+                    tableName = "messages",
+                    recordId = msgId,
+                    payload = "" 
+                )
+                pendingSyncDao.insert(syncOp)
+
+                syncManager.triggerSync()
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error sending message", e)
             }

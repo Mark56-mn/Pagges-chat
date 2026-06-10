@@ -91,6 +91,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation("androidx.work:work-runtime-ktx:2.9.0")
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.retrofit.converter.serialization)
   // implementation(libs.coil.compose)

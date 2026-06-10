@@ -11,5 +11,6 @@ data class PendingSyncEntity(
     val tableName: String,
     val recordId: String,
     val payload: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val retryCount: Int = 0
 )
