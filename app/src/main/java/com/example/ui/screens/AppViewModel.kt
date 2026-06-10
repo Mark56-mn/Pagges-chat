@@ -12,6 +12,8 @@ import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.broadcast
+import io.github.jan.supabase.realtime.broadcastFlow
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.realtime.decodeRecord
@@ -93,9 +95,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _isTypingMap = mutableMapOf<String, MutableStateFlow<Boolean>>()
+
+    fun getTypingState(conversationId: String): StateFlow<Boolean> {
+        return _isTypingMap.getOrPut(conversationId) { MutableStateFlow(false) }.asStateFlow()
+    }
+
+    fun setTyping(conversationId: String, isTyping: Boolean) {
+        viewModelScope.launch {
+            try {
+                val channel = SupabaseManager.client.channel("typing_$conversationId")
+                channel.broadcast(event = "typing", message = mapOf("user_id" to getUserId(), "status" to isTyping))
+            } catch (e: Exception) {
+                Log.e("AppViewModel", "Error broadcasting typing", e)
+            }
+        }
+    }
+
     fun getMessages(conversationId: String): StateFlow<List<Message>> {
         val isNew = !messageFlows.containsKey(conversationId)
         val flow = messageFlows.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
+        val typingFlow = _isTypingMap.getOrPut(conversationId) { MutableStateFlow(false) }
+        
         if (isNew) {
             viewModelScope.launch {
                 try {
@@ -116,10 +137,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             flow.value = currentList + newMessage
                         }
                     }.launchIn(viewModelScope)
+                    
+                    val typingChannel = SupabaseManager.client.channel("typing_$conversationId")
+                    typingChannel.broadcastFlow<Map<String, Any>>(event = "typing")
+                        .onEach { action -> 
+                             // To fix Unresolved reference 'message' or 'payload', print properties or try using it as action itself 
+                             val data = action
+                             val senderId = data["user_id"] as? String
+                             val status = data["status"] as? Boolean ?: false
+                             if (senderId != getUserId()) {
+                                 typingFlow.value = status
+                             }
+                        }.launchIn(viewModelScope)
 
                     io.github.jan.supabase.realtime.Realtime // Just to make sure it's loaded
                     SupabaseManager.client.realtime.connect()
                     channel.subscribe()
+                    typingChannel.subscribe()
                 } catch (e: Exception) {
                     Log.e("AppViewModel", "Error fetching messages", e)
                 }

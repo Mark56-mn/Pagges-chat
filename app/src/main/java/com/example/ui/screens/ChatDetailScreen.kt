@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.app.Application
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,19 +63,42 @@ fun ChatDetailScreen(
     val conversation = conversations.find { it.id == conversationId }
     val messagesFlow = remember(conversationId) { viewModel.getMessages(conversationId) }
     val messages by messagesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val isOtherTyping by viewModel.getTypingState(conversationId).collectAsStateWithLifecycle()
 
     var inputText by remember { mutableStateOf("") }
     var showAiModal by remember { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(inputText) {
+        viewModel.setTyping(conversationId, inputText.isNotBlank())
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
+            androidx.compose.material3.TopAppBar(
                 title = {
-                    Text(
-                        text = conversation?.other_party_name ?: "Chat",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = conversation?.other_party_name?.take(2)?.uppercase() ?: "U",
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = conversation?.other_party_name ?: "Chat",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -96,12 +121,20 @@ fun ChatDetailScreen(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                androidx.compose.material3.TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Type a message...") },
-                    shape = RoundedCornerShape(24.dp)
+                    shape = RoundedCornerShape(24.dp),
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    maxLines = 4
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 IconButton(
@@ -128,11 +161,19 @@ fun ChatDetailScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             reverseLayout = true
         ) {
+            if (isOtherTyping) {
+                item {
+                    TypingIndicatorBubble()
+                }
+            }
             items(messages.reversed()) { msg ->
+                val initials = conversation?.other_party_name?.take(2)?.uppercase() ?: "U"
                 MessageBubble(
                     text = msg.text,
                     isFromMe = msg.is_from_me,
-                    isAi = msg.is_ai
+                    isAi = msg.is_ai,
+                    timestamp = msg.timestamp,
+                    initials = initials
                 )
             }
         }
@@ -191,7 +232,74 @@ fun ChatDetailScreen(
 }
 
 @Composable
-fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean) {
+fun TypingIndicatorBubble() {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(MaterialTheme.colorScheme.secondary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "...",
+                    color = MaterialTheme.colorScheme.onSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition()
+                val offset1 by infiniteTransition.animateFloat(
+                    initialValue = 0f, targetValue = 1f,
+                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                        animation = androidx.compose.animation.core.tween(600),
+                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                    ),
+                    label = "offset1"
+                )
+                val offset2 by infiniteTransition.animateFloat(
+                    initialValue = 0f, targetValue = 1f,
+                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                        animation = androidx.compose.animation.core.tween(600, delayMillis = 200),
+                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                    ),
+                    label = "offset2"
+                )
+                val offset3 by infiniteTransition.animateFloat(
+                    initialValue = 0f, targetValue = 1f,
+                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                        animation = androidx.compose.animation.core.tween(600, delayMillis = 400),
+                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+                    ),
+                    label = "offset3"
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f + offset1 * 0.5f)))
+                    Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f + offset2 * 0.5f)))
+                    Box(modifier = Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f + offset3 * 0.5f)))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean, timestamp: Long, initials: String = "U") {
     val bgColor = when {
         isAi -> Color(0xFFE8F5E9)   // Light green for AI
         isFromMe -> MaterialTheme.colorScheme.primaryContainer
@@ -204,23 +312,74 @@ fun MessageBubble(text: String, isFromMe: Boolean, isAi: Boolean) {
     }
     val alignment = if (isFromMe) Alignment.CenterEnd else Alignment.CenterStart
     val shape = if (isFromMe) {
-        RoundedCornerShape(16.dp, 16.dp, 0.dp, 16.dp)
+        RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
     } else {
-        RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp)
+        RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
+    }
+
+    val timeString = remember(timestamp) {
+        val formatter = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+        formatter.format(java.util.Date(timestamp))
     }
 
     Box(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         contentAlignment = alignment
     ) {
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .clip(shape)
-                .background(bgColor)
-                .padding(12.dp)
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(text = text, color = textColor, fontSize = 16.sp)
+            if (!isFromMe) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (isAi) Color(0xFF81C784) else MaterialTheme.colorScheme.secondary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isAi) "AI" else initials,
+                        color = if (isAi) Color.White else MaterialTheme.colorScheme.onSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .clip(shape)
+                    .background(bgColor)
+                    .padding(12.dp)
+            ) {
+                Text(text = text, color = textColor, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = timeString, 
+                    color = textColor.copy(alpha = 0.7f), 
+                    fontSize = 10.sp,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
+
+            if (isFromMe) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "ME",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
