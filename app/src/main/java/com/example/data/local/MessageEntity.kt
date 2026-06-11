@@ -14,5 +14,7 @@ data class MessageEntity(
     val isFromMe: Boolean,
     val isSynced: Boolean = false,
     val imageUrl: String? = null,
-    val voiceNoteUrl: String? = null
+    val voiceNoteUrl: String? = null,
+    val isPinned: Boolean = false,
+    val reactions: String? = null
 )

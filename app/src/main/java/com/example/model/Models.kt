@@ -44,7 +44,8 @@ data class Message(
     val is_ai: Boolean,
     val timestamp: Long,
     val image_url: String? = null,
-    val voice_note_url: String? = null
+    val voice_note_url: String? = null,
+    val reactions: String? = null
 )
 
 @Serializable

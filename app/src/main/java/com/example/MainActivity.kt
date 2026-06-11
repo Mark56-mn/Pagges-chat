@@ -17,13 +17,45 @@ import com.example.ui.screens.ChatDetailScreen
 import com.example.ui.screens.MainScreen
 import com.example.ui.screens.SplashScreen
 import com.example.ui.theme.MyApplicationTheme
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.isSystemInDarkTheme
+import com.example.data.local.UserPreferences
+import com.example.ui.screens.SettingsScreen
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+
+    val networkMonitor = com.example.util.NetworkMonitor(this)
+    val syncManager = com.example.worker.SyncManager(this)
+    val userPreferences = UserPreferences(this)
+
+    lifecycleScope.launch {
+        var wasOffline = false
+        networkMonitor.isOnline.collectLatest { isOnline ->
+            if (isOnline && wasOffline) {
+                syncManager.triggerSync()
+            }
+            if (!isOnline) {
+                wasOffline = true
+            }
+        }
+    }
+
     enableEdgeToEdge()
     setContent {
-      MyApplicationTheme {
+      val themeMode by userPreferences.themeMode.collectAsState(initial = "System")
+      val darkTheme = when (themeMode) {
+          "Light" -> false
+          "Dark" -> true
+          else -> isSystemInDarkTheme()
+      }
+
+      MyApplicationTheme(darkTheme = darkTheme) {
         var showSplash by rememberSaveable { mutableStateOf(true) }
         
         Crossfade(targetState = showSplash, label = "App Content Crossfade") { isSplash ->
@@ -60,6 +92,11 @@ class MainActivity : ComponentActivity() {
                             viewModel = authViewModel
                         )
                     }
+                    composable("settings") {
+                        SettingsScreen(
+                            onNavigateBack = { navController.popBackStack() }
+                        )
+                    }
                     composable("main") {
                         MainScreen(
                             onNavigateToChat = { chatId ->
@@ -70,6 +107,9 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate("login") {
                                     popUpTo("main") { inclusive = true }
                                 }
+                            },
+                            onNavigateToSettings = {
+                                navController.navigate("settings")
                             }
                         )
                     }

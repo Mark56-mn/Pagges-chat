@@ -38,9 +38,9 @@ import com.example.util.NetworkMonitor
 fun PaggesScreen() {
     val context = LocalContext.current
     val networkMonitor = remember { NetworkMonitor(context) }
-    val isConnected by networkMonitor.isConnected.collectAsStateWithLifecycle(initialValue = true)
+    val isOnline by networkMonitor.isOnline.collectAsStateWithLifecycle(initialValue = true)
 
-    if (isConnected) {
+    if (isOnline) {
         PaggesContent()
     } else {
         OfflineScreen()

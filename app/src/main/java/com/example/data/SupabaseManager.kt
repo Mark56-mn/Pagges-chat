@@ -1,11 +1,13 @@
 package com.example.data
 
 import com.example.BuildConfig
+import com.example.api.OptimizedApiClient
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.gotrue.Auth
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.ktor.client.engine.okhttp.OkHttp
 
 object SupabaseManager {
     val client: SupabaseClient by lazy {
@@ -19,6 +21,9 @@ object SupabaseManager {
             supabaseUrl = baseUrl,
             supabaseKey = BuildConfig.SUPABASE_API_KEY
         ) {
+            this.httpEngine = OkHttp.create {
+                preconfigured = OptimizedApiClient.okHttpClient
+            }
             install(Postgrest)
             install(Auth)
             install(Realtime)

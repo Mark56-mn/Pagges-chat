@@ -38,7 +38,7 @@ fun VoiceNotePlayer(
         if (voiceNoteUrl.startsWith("http")) {
             withContext(Dispatchers.IO) {
                 try {
-                    val fileName = "voice_note_${voiceNoteUrl.hashCode()}.amr"
+                    val fileName = "voice_note_${voiceNoteUrl.hashCode()}.m4a"
                     val file = File(context.cacheDir, fileName)
                     if (!file.exists()) {
                         val input = URL(voiceNoteUrl).openStream()

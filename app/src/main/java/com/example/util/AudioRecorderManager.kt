@@ -21,17 +21,19 @@ class AudioRecorderManager(private val context: Context) {
             return false
         }
 
-        val outputFile = File(context.cacheDir, "audio_record_${System.currentTimeMillis()}.amr")
+        val outputFile = File(context.cacheDir, "audio_record_${System.currentTimeMillis()}.m4a")
         currentFilePath = outputFile.absolutePath
 
         mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             MediaRecorder(context)
         } else {
+            @Suppress("DEPRECATION")
             MediaRecorder()
         }.apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.AMR_NB)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            setAudioEncodingBitRate(64000)
             setOutputFile(currentFilePath)
             try {
                 prepare()

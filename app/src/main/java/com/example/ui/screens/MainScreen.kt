@@ -54,7 +54,7 @@ enum class MainTab {
 }
 
 @Composable
-fun MainScreen(onNavigateToChat: (String) -> Unit, onLogout: () -> Unit) {
+fun MainScreen(onNavigateToChat: (String) -> Unit, onLogout: () -> Unit, onNavigateToSettings: () -> Unit = {}) {
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.CHATS) }
 
     Scaffold(
@@ -106,7 +106,7 @@ fun MainScreen(onNavigateToChat: (String) -> Unit, onLogout: () -> Unit) {
             when (tab) {
                 MainTab.WALLET -> WalletScreen()
                 MainTab.CHATS -> ChatsScreen(onNavigateToChat = onNavigateToChat)
-                MainTab.PROFILE -> ProfileScreen(onLogout = onLogout)
+                MainTab.PROFILE -> ProfileScreen(onLogout = onLogout, onNavigateToSettings = onNavigateToSettings)
             }
         }
     }

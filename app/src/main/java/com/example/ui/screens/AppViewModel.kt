@@ -42,7 +42,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _searchResults = MutableStateFlow<List<com.example.data.local.MessageEntity>>(emptyList())
     val searchResults: StateFlow<List<com.example.data.local.MessageEntity>> = _searchResults.asStateFlow()
 
-    private val messageFlows = mutableMapOf<String, MutableStateFlow<List<Message>>>()
+    private val messageFlows = mutableMapOf<String, MutableStateFlow<List<com.example.data.local.MessageEntity>>>()
 
     fun searchLocalMessages(query: String) {
         viewModelScope.launch {
@@ -132,36 +132,111 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun getMessages(conversationId: String): StateFlow<List<Message>> {
+    fun togglePinMessage(messageId: String, isPinned: Boolean) {
+        viewModelScope.launch {
+            try {
+                com.example.data.local.AppDatabase.getDatabase(getApplication()).messageDao().updatePinnedStatus(messageId, isPinned)
+            } catch (e: Exception) {
+                Log.e("AppViewModel", "Error toggling pin", e)
+            }
+        }
+    }
+
+    fun getPinnedMessages(conversationId: String): StateFlow<List<com.example.data.local.MessageEntity>> {
+        val flow = MutableStateFlow<List<com.example.data.local.MessageEntity>>(emptyList())
+        viewModelScope.launch {
+            com.example.data.local.AppDatabase.getDatabase(getApplication()).messageDao().getPinnedMessages(conversationId).collect {
+                flow.value = it
+            }
+        }
+        return flow.asStateFlow()
+    }
+
+    fun getMessages(conversationId: String): StateFlow<List<com.example.data.local.MessageEntity>> {
         val isNew = !messageFlows.containsKey(conversationId)
         val flow = messageFlows.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
         val typingFlow = _isTypingMap.getOrPut(conversationId) { MutableStateFlow(false) }
         
         if (isNew) {
             viewModelScope.launch {
+                val db = com.example.data.local.AppDatabase.getDatabase(getApplication())
+                val messageDao = db.messageDao()
+                val networkMonitor = com.example.util.NetworkMonitor(getApplication())
+                
+                // 1. Observe from Room (cached immediately)
+                messageDao.getMessagesByConversationId(conversationId)
+                    .onEach { entities -> 
+                        flow.value = entities
+                    }
+                    .launchIn(viewModelScope)
+
                 try {
-                    flow.value = SupabaseManager.client.postgrest["messages"]
-                        .select { filter { eq("conversation_id", conversationId) } }
-                        .decodeList<Message>()
+                    // 2. Fetch from Supabase in background
+                    if (networkMonitor.isOnline.value) {
+                        val latestMsg = messageDao.getLatestMessage(conversationId)
+                        val lastSyncTimestamp = latestMsg?.timestamp ?: 0L
+
+                        val remoteMessages = SupabaseManager.client.postgrest["messages"]
+                            .select { 
+                                filter { 
+                                    eq("conversation_id", conversationId) 
+                                    gt("timestamp", lastSyncTimestamp)
+                                } 
+                            }
+                            .decodeList<Message>()
+
+                        remoteMessages.forEach { msg ->
+                            val existingMessage = messageDao.getMessageById(msg.id)
+                            val entity = com.example.data.local.MessageEntity(
+                                id = msg.id,
+                                conversationId = msg.conversation_id,
+                                senderId = if (msg.is_from_me) getUserId() else msg.conversation_id, // approximation
+                                text = msg.text,
+                                timestamp = msg.timestamp,
+                                isFromMe = msg.is_from_me,
+                                isSynced = true,
+                                imageUrl = msg.image_url,
+                                voiceNoteUrl = msg.voice_note_url,
+                                reactions = msg.reactions,
+                                isPinned = existingMessage?.isPinned ?: false
+                            )
+                            messageDao.insert(entity)
+                        }
+                    }
 
                     val channel = SupabaseManager.client.channel("messages_$conversationId")
-                    val messageChanges = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                    val messageChanges = channel.postgresChangeFlow<io.github.jan.supabase.realtime.PostgresAction>(schema = "public") {
                         table = "messages"
                         filter = "conversation_id=eq.$conversationId"
                     }
                     
                     messageChanges.onEach { action ->
-                        val newMessage = action.decodeRecord<Message>()
-                        val currentList = flow.value
-                        if (currentList.none { it.id == newMessage.id }) {
-                            flow.value = currentList + newMessage
+                        val msg = when (action) {
+                            is io.github.jan.supabase.realtime.PostgresAction.Insert -> action.decodeRecord<Message>()
+                            is io.github.jan.supabase.realtime.PostgresAction.Update -> action.decodeRecord<Message>()
+                            else -> return@onEach
                         }
+                        // Preserve local properties if they exist
+                        val existingMessage = messageDao.getMessageById(msg.id)
+                        val entity = com.example.data.local.MessageEntity(
+                            id = msg.id,
+                            conversationId = msg.conversation_id,
+                            senderId = if (msg.is_from_me) getUserId() else msg.conversation_id,
+                            text = msg.text,
+                            timestamp = msg.timestamp,
+                            isFromMe = msg.is_from_me,
+                            isSynced = true,
+                            imageUrl = msg.image_url,
+                            voiceNoteUrl = msg.voice_note_url,
+                            reactions = msg.reactions,
+                            isPinned = existingMessage?.isPinned ?: false
+                        )
+                        messageDao.insert(entity)
                     }.launchIn(viewModelScope)
                     
                     val typingChannel = SupabaseManager.client.channel("typing_$conversationId")
                     typingChannel.broadcastFlow<Map<String, Any>>(event = "typing")
                         .onEach { action -> 
-                             // To fix Unresolved reference 'message' or 'payload', print properties or try using it as action itself 
                              val data = action
                              val senderId = data["user_id"] as? String
                              val status = data["status"] as? Boolean ?: false
@@ -170,7 +245,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                              }
                         }.launchIn(viewModelScope)
 
-                    io.github.jan.supabase.realtime.Realtime // Just to make sure it's loaded
+                    io.github.jan.supabase.realtime.Realtime 
                     SupabaseManager.client.realtime.connect()
                     channel.subscribe()
                     typingChannel.subscribe()
@@ -255,7 +330,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendMessage(conversationId: String, text: String, isAi: Boolean = false, voiceNoteUrl: String? = null) {
+    fun sendMessage(conversationId: String, text: String, isAi: Boolean = false, voiceNoteUrl: String? = null, imageUrl: String? = null) {
         viewModelScope.launch {
             try {
                 val database = com.example.data.local.AppDatabase.getDatabase(getApplication())
@@ -273,7 +348,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = System.currentTimeMillis(),
                     isFromMe = true,
                     isSynced = false,
-                    voiceNoteUrl = voiceNoteUrl
+                    voiceNoteUrl = voiceNoteUrl,
+                    imageUrl = imageUrl
                 )
                 messageDao.insert(entity)
 
@@ -296,19 +372,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun receiveMessage(conversationId: String, text: String, isAi: Boolean = false) {
         viewModelScope.launch {
             try {
-                val msg = Message(
+                val msgEntity = com.example.data.local.MessageEntity(
                     id = UUID.randomUUID().toString(),
-                    conversation_id = conversationId,
+                    conversationId = conversationId,
+                    senderId = if (isAi) "AI" else conversationId,
                     text = text,
-                    is_from_me = false,
-                    is_ai = isAi,
+                    isFromMe = false,
+                    isSynced = true,
                     timestamp = System.currentTimeMillis()
                 )
-                SupabaseManager.client.postgrest["messages"].insert(msg)
+                com.example.data.local.AppDatabase.getDatabase(getApplication()).messageDao().insert(msgEntity)
                 
                 val flow = messageFlows[conversationId]
                 if (flow != null) {
-                    flow.value = listOf(msg) + flow.value
+                    flow.value = listOf(msgEntity) + flow.value
                 }
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error receiving message", e)
@@ -331,6 +408,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _userProfile.value = newProfile
             } catch (e: Exception) {
                 Log.e("AppViewModel", "Error updating profile", e)
+            }
+        }
+    }
+
+    fun addReaction(messageId: String, emoji: String) {
+        viewModelScope.launch {
+            try {
+                val db = com.example.data.local.AppDatabase.getDatabase(getApplication())
+                val messageDao = db.messageDao()
+                val message = messageDao.getMessageById(messageId) ?: return@launch
+                
+                val currentReactions = message.reactions ?: ""
+                val newReactions = if (currentReactions.isEmpty()) emoji else "$currentReactions,$emoji"
+                
+                messageDao.updateReactions(messageId, newReactions)
+                
+                SupabaseManager.client.postgrest["messages"]
+                    .update({
+                        set("reactions", newReactions)
+                    }) {
+                        filter { eq("id", messageId) }
+                    }
+            } catch (e: Exception) {
+                Log.e("AppViewModel", "Error adding reaction", e)
             }
         }
     }

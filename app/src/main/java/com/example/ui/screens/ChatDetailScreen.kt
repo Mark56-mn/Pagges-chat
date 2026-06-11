@@ -21,9 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -67,14 +70,33 @@ fun ChatDetailScreen(
     val conversation = conversations.find { it.id == conversationId }
     val messagesFlow = remember(conversationId) { viewModel.getMessages(conversationId) }
     val messages by messagesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val pinnedMessagesFlow = remember(conversationId) { viewModel.getPinnedMessages(conversationId) }
+    val pinnedMessages by pinnedMessagesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val isOtherTyping by viewModel.getTypingState(conversationId).collectAsStateWithLifecycle()
 
     var inputText by remember { mutableStateOf("") }
     var showAiModal by remember { mutableStateOf(false) }
+    var messageOptionsTarget by remember { mutableStateOf<com.example.data.local.MessageEntity?>(null) }
 
     val context = LocalContext.current
     val audioRecorderManager = remember { com.example.util.AudioRecorderManager(context) }
     var isRecording by remember { mutableStateOf(false) }
+
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val galleryLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri: android.net.Uri? ->
+        uri?.let {
+            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                // Compress local file to save data
+                val file = com.example.util.MediaCompressor.compressImageToWebP(context, it)
+                if (file != null) {
+                    val fileUri = "file://${file.absolutePath}"
+                    viewModel.sendMessage(conversationId, "📷 Photo", isAi = false, voiceNoteUrl = null, imageUrl = fileUri)
+                }
+            }
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(inputText) {
         viewModel.setTyping(conversationId, inputText.isNotBlank())
@@ -139,6 +161,13 @@ fun ChatDetailScreen(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = {
+                        galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) {
+                    Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "Attach image", tint = MaterialTheme.colorScheme.primary)
+                }
                 androidx.compose.material3.TextField(
                     value = inputText,
                     onValueChange = { inputText = it },
@@ -194,15 +223,43 @@ fun ChatDetailScreen(
             }
         }
     ) { paddingValues ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            reverseLayout = true
+                .background(MaterialTheme.colorScheme.background)
         ) {
+            if (pinnedMessages.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "📌 Pinned Message",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = pinnedMessages.last().text,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                reverseLayout = true
+            ) {
             if (isOtherTyping) {
                 item {
                     TypingIndicatorBubble()
@@ -212,15 +269,21 @@ fun ChatDetailScreen(
                 val initials = conversation?.other_party_name?.take(2)?.uppercase() ?: "U"
                 MessageBubble(
                     text = msg.text,
-                    isFromMe = msg.is_from_me,
-                    isAi = msg.is_ai,
+                    isFromMe = msg.isFromMe,
+                    isAi = msg.senderId == "AI", // approximation
+                    isPinned = msg.isPinned,
                     timestamp = msg.timestamp,
                     initials = initials,
                     avatarUrl = conversation?.avatar_url,
-                    imageUrl = msg.image_url,
-                    voiceNoteUrl = msg.voice_note_url
+                    imageUrl = msg.imageUrl,
+                    voiceNoteUrl = msg.voiceNoteUrl,
+                    reactions = msg.reactions,
+                    onLongPress = {
+                        messageOptionsTarget = msg
+                    }
                 )
             }
+        }
         }
     }
 
@@ -270,6 +333,53 @@ fun ChatDetailScreen(
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { showAiModal = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    messageOptionsTarget?.let { msg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { messageOptionsTarget = null },
+            title = { Text("Message Options") },
+            text = {
+                Column {
+                    Text("Add a reaction:", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val emojis = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+                        emojis.forEach { emoji ->
+                            Text(
+                                text = emoji,
+                                fontSize = 28.sp,
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .clickable {
+                                        viewModel.addReaction(msg.id, emoji)
+                                        messageOptionsTarget = null
+                                    }
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            viewModel.togglePinMessage(msg.id, !msg.isPinned)
+                            messageOptionsTarget = null
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (msg.isPinned) "Unpin Message" else "Pin Message")
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { messageOptionsTarget = null }) {
+                    Text("Close")
                 }
             }
         )
@@ -343,16 +453,20 @@ fun TypingIndicatorBubble() {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(
     text: String, 
     isFromMe: Boolean, 
     isAi: Boolean, 
+    isPinned: Boolean = false,
     timestamp: Long, 
     initials: String = "U",
     avatarUrl: String? = null,
     imageUrl: String? = null,
-    voiceNoteUrl: String? = null
+    voiceNoteUrl: String? = null,
+    reactions: String? = null,
+    onLongPress: () -> Unit = {}
 ) {
     val bgColor = when {
         isAi -> Color(0xFFE8F5E9)   // Light green for AI
@@ -416,8 +530,20 @@ fun MessageBubble(
                     .widthIn(max = 280.dp)
                     .clip(shape)
                     .background(bgColor)
+                    .combinedClickable(
+                        onLongClick = onLongPress,
+                        onClick = {}
+                    )
                     .padding(12.dp)
             ) {
+                if (isPinned) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = "Pinned",
+                        modifier = Modifier.size(12.dp).align(Alignment.End),
+                        tint = textColor.copy(alpha = 0.5f)
+                    )
+                }
                 if (!imageUrl.isNullOrBlank()) {
                     com.example.ui.components.OfflineImage(
                         imageUrl = imageUrl,
@@ -443,6 +569,22 @@ fun MessageBubble(
                     fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.End)
                 )
+                if (!reactions.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier
+                            .align(if (isFromMe) Alignment.End else Alignment.Start)
+                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        reactions.split(",").forEach { emoji ->
+                            if (emoji.isNotBlank()) {
+                                Text(text = emoji, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
 
             if (isFromMe) {
